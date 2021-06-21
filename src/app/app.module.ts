@@ -20,9 +20,10 @@ import { DisclaimerDialogComponent }    from './dialogs/disclaimer-dialog.compon
 import { DownloadDialogComponent }    from './dialogs/download-dialog.component';
 import { HowToDialogComponent }    from './dialogs/howto-dialog.component';
 import { PurchaseDialogComponent }    from './dialogs/purchase-dialog.component';
+import { ErrorsDialogComponent }    from './dialogs/errors-dialog.component';
 import { CharterContentComponent }    from './dialogs/charter-content.component';
 import { MessagesComponent }    from './messages/messages.component';
-import { D3TestComponent }      from './d3-test/d3-test.component';
+import { GraphComponent }      from './graph/graph.component';
 import { TreeModule } from 'angular-tree-component';
 
 import { MatAutocompleteModule } from '@angular/material/autocomplete';
@@ -64,6 +65,9 @@ import { PortalModule } from '@angular/cdk/portal';
 
 import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
 import { FlexLayoutModule } from '@angular/flex-layout';
+import { injectHighlightBodyPipe, injectHighlightSectionPipe, getCommentTextPipe } from './pipes/HighlightPipe';
+import { getNodeColorPipe, getNodeIconPipe, getNodeIconAltPipe, getBodyPipe, getSectionPipe, getConnectionsTextPipe } from './pipes/NodePipe';
+import { formatDatePipe } from './pipes/FormatDatePipe'
 
 @NgModule({
   imports: [
@@ -123,6 +127,7 @@ import { FlexLayoutModule } from '@angular/flex-layout';
     DownloadDialogComponent,
     HowToDialogComponent,
     PurchaseDialogComponent,
+    ErrorsDialogComponent,
     CharterContentComponent
   ],
   declarations: [
@@ -138,10 +143,22 @@ import { FlexLayoutModule } from '@angular/flex-layout';
     DownloadDialogComponent,
     HowToDialogComponent,
     PurchaseDialogComponent,
+    ErrorsDialogComponent,
     MessagesComponent,
     StandardMapSearchComponent,
-    D3TestComponent,
-    CharterContentComponent
+    GraphComponent,
+    CharterContentComponent,
+
+    injectHighlightBodyPipe,
+    injectHighlightSectionPipe,
+    getCommentTextPipe,
+    getNodeColorPipe,
+    getNodeIconPipe,
+    getNodeIconAltPipe,
+    getBodyPipe,
+    getSectionPipe,
+    getConnectionsTextPipe,
+    formatDatePipe
   ],
   providers: [ CookieService ],
   bootstrap: [ AppComponent ]

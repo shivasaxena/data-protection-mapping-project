@@ -2,8 +2,10 @@
 var Excel = require('exceljs');
 
 var xlsxFile = "./src/assets/database.xlsx";
-var outputFile = "./src/assets/db.json";
-var outputFile2 = "./docs/assets/db.json"; // write one straight to the bin file so the user doesnt have to run the build pipeline.
+
+var outputDir1 = "./src/assets/output/";
+var outputDir2 = "./docs/assets/output/"; // write one straight to the bin file so the user doesnt have to run the build pipeline.
+var outputFile = "db.json";
 
 function flatten(nodes, result) {
     for (var n of nodes)
@@ -46,12 +48,33 @@ function exportXlsx(allDocs) {
       });
 }
 
-function writeResult(result) {
+function writeResultDir(dir, result, optional) {
     const fs = require('fs');
+
+    try {
+      if (!fs.existsSync(dir)){
+        fs.mkdirSync(dir);
+      }
+    } catch (e) {
+      if (!optional)
+        throw e;
+    }
+
     let data = JSON.stringify(result, null, 4);  
-    console.log(data);
-    fs.writeFileSync(outputFile, data); 
-    fs.writeFileSync(outputFile2, data); 
+    //console.log(data);
+    fs.writeFileSync(dir + outputFile, data);
+
+    // for perf reasons, write it out in chunks to
+    var index = Object.assign({}, result);
+    var docs = index.docs;
+    index.docs = index.docs.map(v => { return { id: v.id, type: v.type }; });
+
+    // write out the index
+    fs.writeFileSync(dir + 'docs-index.json', JSON.stringify(index));
+
+    // write out each doc
+    for (var d of docs)
+      fs.writeFileSync(dir + 'docs-' + d.id + '.json', JSON.stringify(d)); 
 }
 
 var mergeLinks = function (src, dst) {
@@ -106,7 +129,9 @@ var findOrCreateSection = function (root, id) {
             "frag": f, // sortable fragment
             "section": assembled,
             "children": [],
-            "links": []
+            "links": [],
+            "langs": [],
+            "notes": []
           };
 
           root.children.push(node);
@@ -129,70 +154,149 @@ var recursiveSort = function (doc) {
       recursiveSort(c);
 }
 
-var mergeDocRecursive = function (src, dst) {
+var mergeDocRecursive = function (src, dst, prefix = '') {
     for (var d of src)
     {
-        var node = findOrCreateSection(dst, d.id);
+        var node = findOrCreateSection(dst, prefix + d.id);
 
         // copy properties
-        node.id = d.id;
+        node.id = prefix + d.id;
         node.section = d.section;
         node.body = d.body;
         node.hyperlink = d.hyperlink;
         if (d.links)
           mergeLinks(d, node);
+        node.langs = d.langs;
 
         if (d.children)
-          mergeDocRecursive(d.children, dst);
+          mergeDocRecursive(d.children, dst, prefix);
     }
 };
 
-var mergeDoc = function (src, dst) {
-    mergeDocRecursive(src, dst);
+var mergeDoc = function (src, dst, prefix = '') {
+    mergeDocRecursive(src, dst, prefix);
 
     recursiveSort(dst);
 
     return dst;
 };
 
+var parseIsoLinks = function (isoLinks) {
+  return isoLinks.split(';').filter(v => v).map(v => {
+    return {
+      "id": v.trim(),
+      "type": "ISO"
+    };
+  })
+};
+
+
 function processRegulation(worksheet) {
   var idsCol = worksheet.getColumn(1);
+  var headerRow = worksheet.getRow(1);
+
+  // override ISO tab name so its real name can be anything
+  var sheetName = worksheet.id > 1 ? worksheet.name : "ISO";
 
   var ids = [];
   var doc = {
-      "type": worksheet.name,
+      "type": sheetName.trim(),
+      "id": sheetName.replace(/\W/g, ''), // keep only alphanumeric
+      "section": worksheet.name,
       "rev": 1,
-      "children": []
+      "children": [],
+      "langs": []
   };
 
+  const defaultLangKey = "en";
+
   var newChildren = [];
+  var langDictTotal = { [defaultLangKey]: true };
+  var processingNotes = false;
+  var skippedNotesRows = 0;
+  var notes = [];
 
   idsCol.eachCell({ includeEmpty: true }, function(cell, rowNumber) {
       if (rowNumber == 1)
           return; // skip the header row
 
       var row = worksheet.getRow(rowNumber);
-                      
-      var section = row.getCell(2).text;
-      var body = row.getCell(3).text;
-      var hyperlink = row.getCell(4).text;
-      var isolinks = row.getCell(5).text;
+      var idText = cell.text;
 
-      var links = isolinks.split(';').filter(v => v).map(v => { return {
-              "id": v,
-              "type": "ISO"
-            }; });
+      if (processingNotes)
+      {
+        // process notes row
+        console.log("notes.");
+        
+        // skip blank rows
+        if (idText == "")
+          return;
 
-      newChildren.push({
-          id: cell.text,
-          section: section,
-          body: body.length ? body : undefined,
-          hyperlink: hyperlink.length ? hyperlink : undefined,
-          links: links
-      });
+        // skip title and header rows
+        if (skippedNotesRows++ < 2)
+          return;
+        
+        var isoLinks = row.getCell(2).text;
+        var comment = row.getCell(3).text;
+        notes.push({
+            id: idText,
+            links: parseIsoLinks(isoLinks),
+            comment: comment
+        });
+      }
+      else
+      {
+        // process regulation
+        if (idText == "")
+        {
+          // Switch to notes.
+          processingNotes = true;
+          return;
+        }
+
+        var section = row.getCell(2).text;
+        var body = row.getCell(3).text;
+        var hyperlink = row.getCell(4).text;
+        var isoLinks = row.getCell(5).text;
+        var langDict = {
+          [defaultLangKey]: {
+            section: section,
+            body: body.length ? body : undefined
+          }
+        };
+
+        for (var i = 6; i < headerRow.cellCount; i += 2) {
+          var lang = headerRow.getCell(i).text.replace("_section", "");
+          var langSection = row.getCell(i).text;
+          var langBody = row.getCell(i + 1).text;
+          langDictTotal[lang] = true;
+          langDict[lang] = {
+            lang: lang,
+            section: langSection,
+            body: langBody.length ? langBody : undefined
+          };
+        }
+        
+        newChildren.push({
+            id: idText,
+            hyperlink: hyperlink.length ? hyperlink : undefined,
+            links: parseIsoLinks(isoLinks),
+            langs: langDict
+        });
+      }
   });
 
+  doc.langs = Object.keys(langDictTotal);
+
   mergeDoc(newChildren, doc);
+
+  // zip in notes
+  //doc.notes = notes;
+  for (var n of notes) {
+    var node = findOrCreateSection(doc, n.id);
+    node.notes.push(n);
+  }
+
   return doc;
 }
 
@@ -237,17 +341,36 @@ function importXlsx() {
               }
           });
 
+          // Create all-doc
+          var allDoc = {
+              "type": "All",
+              "id": "All",
+              "rev": 1,
+              "children": [],
+              "langs": []
+          };
+
+          for (var d of allDocs) {
+            if (d.type != "ISO") {
+              var rootKey = d.type.replace(/\W/g, '_'); // replace nonalphanumeric with _ so it doesnt get parsed as id structure.
+              mergeDoc(d.children, allDoc, rootKey + ".");
+              allDoc.children[allDoc.children.length - 1].section = d.type;
+            }
+          }
+
+          allDocs.push(allDoc);
+
           var db = {
             "changelog": changeLog,
             "docs": allDocs
           };
-          writeResult(db);
+          writeResultDir(outputDir1, db);
+          writeResultDir(outputDir2, db, true); // this is only here to hot fix an existing build. if there's no build, no need.
       });
 };
 
 module.exports = {
     exportXlsx,
-    writeResult,
     mergeDoc,
     normalizePath,
     mergeLinks
